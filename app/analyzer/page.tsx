@@ -938,10 +938,25 @@ export default function AnalyzerPage() {
     }
   };
 
+  const openSeoEditor = () => {
+    if (!pageBrief) return;
+    try {
+      sessionStorage.setItem("bar:seo-editor:brief:v1", pageBrief);
+      if (ownPage.mode === "text" && ownPage.text.trim()) {
+        sessionStorage.setItem("bar:seo-editor:article:v1", ownPage.text);
+      } else {
+        sessionStorage.removeItem("bar:seo-editor:article:v1");
+      }
+    } catch {
+      // The editor remains available through manual Markdown upload if storage is unavailable.
+    }
+    window.location.assign("/editor");
+  };
+
   return <main className={styles.page}>
     <header className={styles.header}>
       <Link className={styles.brand} href="/" aria-label="Главная БАР"><Image src="/seomeat-logo.svg" alt="SEO Meat" width={152} height={16} priority /><span><b>БАР</b><small>Бесплатный анализ релевантности</small></span></Link>
-      <nav className={styles.headerRight} aria-label="Ссылки проекта"><Link href="/">Главная БАР</Link><a href="https://seomeat.ru/" target="_blank" rel="noreferrer">Школа SEO Мясо ↗</a><a href="https://t.me/closedchannelkotenkov" target="_blank" rel="noreferrer">ТГК школы ↗</a><a href="https://t.me/seokotenkov" target="_blank" rel="noreferrer">Создатель ↗</a><span className={styles.live}><i />Сервис работает</span></nav>
+      <nav className={styles.headerRight} aria-label="Ссылки проекта"><Link href="/">Главная БАР</Link><Link href="/editor">AI SEO Editor</Link><a href="https://seomeat.ru/" target="_blank" rel="noreferrer">Школа SEO Мясо ↗</a><a href="https://t.me/closedchannelkotenkov" target="_blank" rel="noreferrer">ТГК школы ↗</a><a href="https://t.me/seokotenkov" target="_blank" rel="noreferrer">Создатель ↗</a><span className={styles.live}><i />Сервис работает</span></nav>
     </header>
 
     <div className={styles.shell}>
@@ -1101,7 +1116,7 @@ export default function AnalyzerPage() {
         </section>
 
         <section className={`${styles.reportSection} ${styles.briefSection}`} aria-labelledby="page-brief-heading">
-          <div className={styles.sectionHead}><div><span className={styles.sectionIndex}>06</span><div className={styles.titleWithHelp}><h2 id="page-brief-heading">ТЗ для страницы</h2><HelpTip text="Готовый список правок можно вставить в редактор, задачу или передать другому агенту." /></div><p>Готовый Markdown сгруппирован по HTML-зонам. В каждой зоне сначала идут фразы, затем отдельные леммы; строки в рекомендуемом диапазоне не добавляются.</p></div><button className={styles.copyBrief} type="button" title="Скопировать всё ТЗ в формате Markdown" onClick={() => void copyPageBrief()} aria-live="polite">{briefCopied ? "Скопировано ✓" : "Копировать MD"}</button></div>
+          <div className={styles.sectionHead}><div><span className={styles.sectionIndex}>06</span><div className={styles.titleWithHelp}><h2 id="page-brief-heading">ТЗ для страницы</h2><HelpTip text="Готовый список правок можно вставить в редактор, задачу или передать другому агенту." /></div><p>Готовый Markdown сгруппирован по HTML-зонам. В каждой зоне сначала идут фразы, затем отдельные леммы; строки в рекомендуемом диапазоне не добавляются.</p></div><button className={styles.copyBrief} type="button" title="Скопировать всё ТЗ в формате Markdown" onClick={() => void copyPageBrief()} aria-live="polite">{briefCopied ? "Скопировано ✓" : "Копировать MD"}</button><button className={styles.copyBrief} type="button" title="Передать ТЗ и текстовый ввод в AI SEO Editor" onClick={openSeoEditor}>Передать в редактор →</button></div>
           <pre className={styles.briefMarkdown}><code>{pageBrief}</code></pre>
         </section>
 
