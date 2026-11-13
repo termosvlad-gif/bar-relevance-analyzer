@@ -1,6 +1,5 @@
 .git/
 .github/
-.openai/
 .env*
 .dev.vars*
 node_modules/
