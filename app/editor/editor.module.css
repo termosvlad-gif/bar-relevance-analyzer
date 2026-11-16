@@ -115,3 +115,27 @@
   .decisionControl { width: 100%; }
   .exportActions { width: 100%; }
 }
+/* Stage 2: server-protected assistant and explicit change approval */
+.aiPanel, .editPanel { margin-top: 22px; padding: 20px; border: 1px solid var(--line); border-radius: 15px; background: #fff; }
+.aiPanel { display: grid; gap: 13px; }
+.aiPanel h2 { margin: 5px 0 0; font-size: 23px; letter-spacing: -.035em; }
+.aiSettings { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.aiSettings label, .rulesLabel { display: grid; gap: 7px; color: #505c49; font-size: 11px; font-weight: 750; }
+.aiSettings select, .aiSettings input, .rulesLabel textarea { width: 100%; min-height: 39px; padding: 9px; border: 1px solid #dce1d8; border-radius: 8px; background: #fbfcf9; color: #232b20; font-size: 12px; font-family: inherit; line-height: 1.4; }
+.rulesLabel textarea { min-height: 75px; resize: vertical; font-family: inherit; }
+.aiHint { margin: 0; color: #65725e; font-size: 11px; line-height: 1.6; }
+.aiWarning { margin: 0; padding: 12px; border: 1px solid #f3c87c; border-radius: 8px; background: #fff9eb; color: #865d20; font-size: 11px; }
+.aiActions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.aiActions button:disabled, .editCard button:disabled { opacity: .4; cursor: not-allowed; }
+.aiReason { margin: 12px 0 0; padding: 11px 12px; border-left: 3px solid #8eb64c; background: #f5faee; color: #405230; font-size: 11px; line-height: 1.65; }
+.aiReason p { margin: 5px 0 0; }
+.editPanel { display: grid; gap: 12px; }
+.editPanel h2 { margin: 6px 0; font-size: 26px; }
+.editCard { padding: 14px; border: 1px solid var(--line); border-radius: 11px; }
+.editCard p { margin: 0 0 12px; font-size: 11px; line-height: 1.6; }
+.editCompare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.editCompare > div { min-width: 0; padding: 13px; border: 1px solid #e1e5dc; border-radius: 9px; background: #f9faf6; }
+.editCompare > div:last-child { border-color: #cce0b4; background: #f4faed; }
+.editCompare strong { font-size: 10px; }
+.editCompare pre { overflow-x: auto; margin: 9px 0 0; color: #36412e; font: 11px/1.65 var(--font-geist-mono, monospace); white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 700px) { .aiSettings, .editCompare { grid-template-columns: 1fr; } }

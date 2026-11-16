@@ -8,11 +8,13 @@ import {
   type BriefRecommendation,
   type RecommendationDecision,
 } from "@/lib/seo-editor/brief-parser";
+import { applyExactEdit, isEditableZone, reviewBatch, type AiEdit, type AiReview, type EditorialScope } from "@/lib/seo-editor/ai-workflow";
 import styles from "./editor.module.css";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const IMPORT_BRIEF_KEY = "bar:seo-editor:brief:v1";
 const IMPORT_ARTICLE_KEY = "bar:seo-editor:article:v1";
+const IMPORT_SOURCE_KEY = "bar:seo-editor:source:v1";
 
 const DECISION_LABELS: Record<RecommendationDecision, string> = {
   candidate: "Кандидат",
@@ -74,6 +76,14 @@ export default function SeoEditorPage() {
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [scope, setScope] = useState<EditorialScope>("publication");
+  const [sourceInfo, setSourceInfo] = useState("");
+  const [editorPassword, setEditorPassword] = useState("");
+  const [extraRules, setExtraRules] = useState("");
+  const [aiBusy, setAiBusy] = useState<"" | "review" | "edit">("");
+  const [edits, setEdits] = useState<AiEdit[]>([]);
+  const [needsBarCheck, setNeedsBarCheck] = useState(false);
+  const [editBatchStart, setEditBatchStart] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -82,6 +92,7 @@ export default function SeoEditorPage() {
       try {
         const importedBrief = sessionStorage.getItem(IMPORT_BRIEF_KEY);
         const importedArticle = sessionStorage.getItem(IMPORT_ARTICLE_KEY);
+        const importedSource = sessionStorage.getItem(IMPORT_SOURCE_KEY);
         if (importedBrief) {
           setBrief(importedBrief);
           setBriefName("ТЗ передано из текущего отчёта БАР");
@@ -91,6 +102,14 @@ export default function SeoEditorPage() {
           setArticle(importedArticle);
           setArticleName("Текст передан из текущего отчёта БАР");
           sessionStorage.removeItem(IMPORT_ARTICLE_KEY);
+        }
+        if (importedSource) {
+          try {
+            const source = JSON.parse(importedSource) as { mode?: string; url?: string };
+            setScope(source.mode === "url" ? "site" : "publication");
+            setSourceInfo(source.mode === "url" ? `БАР анализировал URL: ${source.url || "адрес не передан"}. Для правок загрузите редактируемый текст страницы.` : "БАР анализировал вставленный текст.");
+          } catch { /* optional provenance only */ }
+          sessionStorage.removeItem(IMPORT_SOURCE_KEY);
         }
         if (importedBrief || importedArticle) {
           setNotice("Материалы переданы из БАР. Проверьте их и нажмите «Разобрать ТЗ».");
@@ -110,6 +129,12 @@ export default function SeoEditorPage() {
     rejected: rows.filter((row) => row.decision === "rejected").length,
   }), [rows]);
 
+  const availableCount = useMemo(() => rows.filter((row) => isEditableZone(row.zoneKey, scope)).length, [rows, scope]);
+  const pendingReviewCount = useMemo(() => rows.filter((row) => isEditableZone(row.zoneKey, scope) && (row.decision === "candidate" || row.decision === "review")).length, [rows, scope]);
+  const selectedForReview = useMemo(() => reviewBatch(rows, scope, false), [rows, scope]);
+  const acceptedRows = useMemo(() => rows.filter((row) => row.decision === "accepted" && isEditableZone(row.zoneKey, scope)), [rows, scope]);
+  const selectedForEdit = useMemo(() => acceptedRows.slice(editBatchStart, editBatchStart + 25), [acceptedRows, editBatchStart]);
+
   const visibleRows = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("ru-RU");
     return rows.filter((row) => {
@@ -122,6 +147,9 @@ export default function SeoEditorPage() {
   const handleArticleFile = (event: ChangeEvent<HTMLInputElement>) => {
     void readMarkdownFile(event, (value, name) => {
       setArticle(value);
+      setEdits([]);
+      setNeedsBarCheck(false);
+      setEditBatchStart(0);
       setArticleName(name);
       setNotice(`Статья «${name}» загружена. Содержимое обрабатывается только в браузере.`);
     }, setError);
@@ -132,6 +160,9 @@ export default function SeoEditorPage() {
       setBrief(value);
       setBriefName(name);
       setRows([]);
+      setEdits([]);
+      setNeedsBarCheck(false);
+      setEditBatchStart(0);
       setNotice(`ТЗ «${name}» загружено. Нажмите «Разобрать ТЗ».`);
     }, setError);
   };
@@ -143,6 +174,9 @@ export default function SeoEditorPage() {
     }
     const parsed = parseBriefMarkdown(brief);
     setRows(parsed.recommendations);
+    setEdits([]);
+    setNeedsBarCheck(false);
+    setEditBatchStart(0);
     setBriefTitle(parsed.title);
     setFilter("all");
     setSearch("");
@@ -150,6 +184,49 @@ export default function SeoEditorPage() {
     setNotice(parsed.recommendations.length
       ? `Разобрано рекомендаций: ${parsed.recommendations.length}. Строк пропущено: ${parsed.ignoredLines}. Предварительные флаги требуют ручной проверки.`
       : "Не удалось найти рекомендации. Проверьте, что загружено ТЗ в формате Markdown из БАР.");
+  };
+
+  const requestAi = async (mode: "review" | "edit") => {
+    setError(""); setNotice("");
+    if (!article.trim() || !rows.length) { setError("Нужны исходный текст статьи и разобранное ТЗ БАР."); return; }
+    if (!editorPassword.trim()) { setError("Введите пароль AI-редактора, настроенный в Timeweb (EDITOR_ACCESS_TOKEN)."); return; }
+    if (extraRules.length > 14_000) { setError("Дополнительные правила: максимум 14 000 символов."); return; }
+    const selection = mode === "review" ? selectedForReview : selectedForEdit;
+    if (!selection.length) { setError(mode === "review" ? "Все доступные рекомендации уже разобраны." : "Сначала примите хотя бы одну рекомендацию вручную или через ИИ."); return; }
+    setAiBusy(mode);
+    try {
+      const response = await fetch("/api/editor/assist", {
+        method: "POST", cache: "no-store",
+        headers: { "Content-Type": "application/json", "X-Editor-Token": editorPassword },
+        body: JSON.stringify({ mode, article, rows: selection, scope, rules: extraRules }),
+      });
+      const data = await response.json() as { error?: string; judgments?: AiReview[]; totalRequested?: number; edits?: AiEdit[] };
+      if (!response.ok) throw new Error(data.error || "Ошибка запроса к AI-редактору.");
+      if (mode === "review") {
+        const incoming = new Map((data.judgments ?? []).map((item) => [item.id, item]));
+        setRows((current) => current.map((row) => {
+          const judgment = incoming.get(row.id);
+          return judgment ? { ...row, decision: judgment.decision, aiReason: judgment.reason, aiSuggestion: judgment.suggestion } : row;
+        }));
+        setNotice(`ИИ обработал ${incoming.size} из ${selection.length} рекомендаций. Проверьте решения и при необходимости измените их вручную.`);
+      } else {
+        setEdits(data.edits ?? []);
+        setNotice((data.edits ?? []).length ? `Подготовлено замен: ${data.edits?.length}. Каждую нужно подтвердить вручную.` : "ИИ не нашёл безопасных точечных замен. Можно выбрать другие рекомендации.");
+      }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Не удалось получить рекомендации ИИ."); }
+    finally { setAiBusy(""); }
+  };
+
+  const applyEdit = (index: number) => {
+    const edit = edits[index];
+    if (!edit) return;
+    const result = applyExactEdit(article, edit);
+    if (!result.ok) { setError(result.error || "Невозможно применить замену."); return; }
+    setArticle(result.text);
+    setNeedsBarCheck(true);
+    setEdits((current) => current.filter((_, position) => position !== index));
+    setError("");
+    setNotice("Правка применена к статье. Показатели БАР устарели: проведите повторный анализ после завершения правок.");
   };
 
   const updateDecision = (id: string, decision: RecommendationDecision) => {
@@ -160,6 +237,10 @@ export default function SeoEditorPage() {
     if (!rows.length) return;
     const markdown = buildDecisionMarkdown(briefTitle, rows);
     downloadText("bar-editor-decisions.md", markdown);
+  };
+
+  const exportArticle = () => {
+    if (article.trim()) downloadText("bar-editor-article-revised.md", article);
   };
 
   const exportAccepted = () => {
@@ -177,7 +258,7 @@ export default function SeoEditorPage() {
         </Link>
         <nav className={styles.headerNav} aria-label="Навигация">
           <Link href="/analyzer">← Анализатор БАР</Link>
-          <span className={styles.localBadge}>ЭТАП 1 · ИМПОРТ И РАЗБОР</span>
+          <span className={styles.localBadge}>ЭТАП 2 · ИИ-ПРАВКИ</span>
         </nav>
       </header>
 
@@ -185,7 +266,7 @@ export default function SeoEditorPage() {
         <section className={styles.intro}>
           <span className={styles.eyebrow}>SEO WORKSPACE / EDITOR</span>
           <h1>От рекомендаций БАР<br />к осмысленным правкам</h1>
-          <p>Загрузите статью и Markdown-ТЗ. Редактор разберёт рекомендации по зонам, покажет потенциально спорные формулировки и позволит принять решение по каждому пункту.</p>
+          <p>После анализа URL или текста в БАР передайте ТЗ и статью сюда. ИИ оценит релевантные рекомендации, предложит конкретные замены, а вы решите, какие применить. БАР и его формулы не изменяются.</p>
         </section>
 
         <section className={styles.inputGrid} aria-label="Исходные материалы">
@@ -199,8 +280,8 @@ export default function SeoEditorPage() {
               <span>↑</span> Загрузить Markdown
             </label>
             <div className={styles.fileName}>{articleName}</div>
-            <textarea className={styles.textarea} value={article} onChange={(event) => setArticle(event.target.value)} placeholder="# Заголовок статьи\n\nВставьте сюда исходный текст в Markdown…" spellCheck={false} />
-            <div className={styles.panelFoot}><span>{wordCount(article).toLocaleString("ru-RU")} слов</span><span>До 5 МБ · только в браузере</span></div>
+            <textarea className={styles.textarea} value={article} onChange={(event) => { setArticle(event.target.value); setEdits([]); setNeedsBarCheck(false); }} placeholder="# Заголовок статьи\n\nВставьте сюда исходный текст в Markdown…" spellCheck={false} />
+            <div className={styles.panelFoot}><span>{wordCount(article).toLocaleString("ru-RU")} слов</span><span>В ИИ отправляется только после нажатия AI-кнопки</span></div>
           </article>
 
           <article className={styles.panel}>
@@ -220,8 +301,48 @@ export default function SeoEditorPage() {
 
         <div className={styles.actionRow}>
           <button className={styles.primaryButton} type="button" onClick={parseBrief}>Разобрать ТЗ <span>→</span></button>
-          <p>Файлы не отправляются на сервер. На этом этапе разбор выполняется локально в браузере.</p>
+          <p>Разбор ТЗ в браузере. ИИ вызывается отдельно: он получает текст статьи, правила и выбранную порцию рекомендаций.</p>
         </div>
+
+        <section className={styles.aiPanel} aria-label="Настройка AI-редактора">
+          <div className={styles.panelHead}>
+            <div><span className={styles.step}>03 / ПОМОЩНИК ИИ</span><h2>Проверка рекомендаций и точечные правки</h2></div>
+            <span className={styles.fileIcon}>AI</span>
+          </div>
+          {sourceInfo && <p className={styles.aiHint}>{sourceInfo}</p>}
+          <div className={styles.aiSettings}>
+            <label>Где будет публикация?
+              <select value={scope} onChange={(event) => { setScope(event.target.value as EditorialScope); setEdits([]); setEditBatchStart(0); }}>
+                <option value="publication">VC.ru / Состав — только статья</option>
+                <option value="site">Собственный сайт — вся страница</option>
+              </select>
+            </label>
+            <label>Пароль AI-редактора (Timeweb)
+              <input type="password" value={editorPassword} onChange={(event) => setEditorPassword(event.target.value)} placeholder="EDITOR_ACCESS_TOKEN" autoComplete="off" />
+            </label>
+          </div>
+          <label className={styles.rulesLabel}>Дополнительные требования к редактуре (необязательно)
+            <textarea value={extraRules} onChange={(event) => setExtraRules(event.target.value)} maxLength={14000} rows={3} placeholder="Правила конкретного проекта, запреты на изменение офферов, обязательные формулировки…" />
+          </label>
+          <p className={styles.aiHint}>Базовые ограничения регламента 13.3 встроены в ИИ-инструкцию. Для VC исключены «Общее» и чужие анкоры; в собственном сайте доступны все зоны. Обрабатываем по 25 рекомендаций, чтобы контролировать стоимость.</p>
+          <div className={styles.aiActions}>
+            <button type="button" className={styles.primaryButton} disabled={Boolean(aiBusy) || !selectedForReview.length} onClick={() => void requestAi("review")}>{aiBusy === "review" ? "ИИ анализирует…" : `ИИ-разбор следующих ${Math.min(25, pendingReviewCount)}`} <span>→</span></button>
+            <button type="button" className={styles.secondaryButton} disabled={Boolean(aiBusy) || !selectedForEdit.length} onClick={() => void requestAi("edit")}>{aiBusy === "edit" ? "ИИ готовит правки…" : `Предложить замены (${selectedForEdit.length} принято)`}</button>
+            <button type="button" className={styles.secondaryButton} disabled={!article.trim()} onClick={exportArticle}>Скачать статью MD</button>
+            {acceptedRows.length > 25 && <button type="button" className={styles.secondaryButton} disabled={Boolean(aiBusy)} onClick={() => { setEditBatchStart((current) => current + 25 >= acceptedRows.length ? 0 : current + 25); setEdits([]); }}>Другие принятые ({Math.min(editBatchStart + 1, acceptedRows.length)}–{Math.min(editBatchStart + 25, acceptedRows.length)} из {acceptedRows.length})</button>}
+          </div>
+          <p className={styles.aiHint}>Доступно рекомендаций в выбранном режиме: {availableCount}; ещё не обработано ИИ или вручную: {pendingReviewCount}. Пароль остаётся в памяти вкладки, не сохраняется в файлах. Запросы к OpenAI платные.</p>
+          {needsBarCheck && <p className={styles.aiWarning}>Текст изменён: цифры в ТЗ БАР больше не соответствуют текущему тексту. Скачайте статью и запустите повторный анализ.</p>}
+        </section>
+
+        {edits.length > 0 && <section className={styles.editPanel} aria-label="Предложенные правки">
+          <div className={styles.resultsHead}><div><span className={styles.step}>04 / ПРОСМОТР ИЗМЕНЕНИЙ</span><h2>Предложения ИИ</h2><p>Каждая замена проверяется по точному исходному фрагменту. Ничего не применяется автоматически.</p></div></div>
+          {edits.map((edit, index) => <article className={styles.editCard} key={`${edit.find.slice(0, 40)}-${index}`}>
+            <p><strong>Почему:</strong> {edit.reason}</p>
+            <div className={styles.editCompare}><div><strong>Было</strong><pre>{edit.find}</pre></div><div><strong>Предлагается</strong><pre>{edit.replace}</pre></div></div>
+            <div className={styles.exportActions}><button type="button" className={styles.primaryButton} onClick={() => applyEdit(index)}>Применить замену <span>✓</span></button><button type="button" className={styles.secondaryButton} onClick={() => setEdits((current) => current.filter((_, i) => i !== index))}>Отклонить</button></div>
+          </article>)}
+        </section>}
 
         {error && <div className={styles.error} role="alert">{error}</div>}
         {notice && <div className={styles.notice} role="status">{notice}</div>}
@@ -229,7 +350,7 @@ export default function SeoEditorPage() {
         {rows.length > 0 && (
           <section className={styles.results} aria-label="Разобранные рекомендации">
             <div className={styles.resultsHead}>
-              <div><span className={styles.step}>03 / РЕДАКЦИОННАЯ СОРТИРОВКА</span><h2>{briefTitle || "Рекомендации БАР"}</h2><p>Ориентиры частотности не являются командами к механическому добавлению. Решение принимается с учётом смысла статьи и поискового интента.</p></div>
+              <div><span className={styles.step}>05 / РЕДАКЦИОННАЯ СОРТИРОВКА</span><h2>{briefTitle || "Рекомендации БАР"}</h2><p>Ориентиры частотности не являются командами к механическому добавлению. Решение принимается с учётом смысла статьи и поискового интента.</p></div>
               <div className={styles.exportActions}>
                 <button type="button" className={styles.secondaryButton} onClick={exportDecisions}>Скачать решения MD</button>
                 <button type="button" className={styles.secondaryButton} onClick={exportAccepted} disabled={!stats.accepted}>Скачать принятые</button>
@@ -258,6 +379,7 @@ export default function SeoEditorPage() {
                     <div className={styles.recMeta}><span>{row.zoneLabel}</span><span>{row.kind === "phrase" ? "Фраза" : "Лемма"}</span><span>{row.action === "add" ? "Добавить" : "Снизить"}</span></div>
                     <h3>{row.term}</h3>
                     <div className={styles.metrics}>Сейчас <b>{row.current}</b><span>·</span> Ориентир <b>{row.target}</b><span>·</span> Диапазон <b>{row.min}–{row.max}</b></div>
+                    {row.aiReason && <div className={styles.aiReason}><strong>Оценка ИИ:</strong> {row.aiReason}{row.aiSuggestion && <p><strong>Предложение:</strong> {row.aiSuggestion}</p>}</div>}
                     {row.reasons.length > 0 && <ul className={styles.reasons}>{row.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
                   </div>
                   <div className={styles.decisionControl}>
@@ -275,7 +397,7 @@ export default function SeoEditorPage() {
 
         <aside className={styles.stageNote}>
           <div className={styles.stageIcon}>i</div>
-          <div><strong>Что уже работает и чего пока нет</strong><p>Это первая техническая версия: импорт Markdown, разбор зон и числовых ориентиров, предварительные флаги и ручное принятие решений. ИИ-классификация по смыслу, автоматическое редактирование и повторный запуск БАР будут подключены следующим этапом — после настройки серверной авторизации и API-ключа. Никакие формулы самого анализатора не меняются.</p></div>
+          <div><strong>Как завершить работу</strong><p>Это этап 2: защищённая ИИ-классификация и точечные подтверждаемые замены. После правок скачайте Markdown, повторите анализ в БАР (вкладка «Вставить текст» либо URL собственного сайта после публикации) и публикуйте только после финального редакторского и фактического аудита. Автопубликации и автоматического запуска БАР пока нет.</p></div>
         </aside>
       </div>
     </main>

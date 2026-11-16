@@ -942,6 +942,7 @@ export default function AnalyzerPage() {
     if (!pageBrief) return;
     try {
       sessionStorage.setItem("bar:seo-editor:brief:v1", pageBrief);
+      sessionStorage.setItem("bar:seo-editor:source:v1", JSON.stringify({ mode: ownPage.mode, url: ownPage.mode === "url" ? ownPage.url : "" }));
       if (ownPage.mode === "text" && ownPage.text.trim()) {
         sessionStorage.setItem("bar:seo-editor:article:v1", ownPage.text);
       } else {

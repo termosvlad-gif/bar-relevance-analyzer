@@ -17,6 +17,8 @@ export type BriefRecommendation = {
   raw: string;
   decision: RecommendationDecision;
   reasons: string[];
+  aiReason?: string;
+  aiSuggestion?: string;
 };
 
 export type ParsedBrief = {
@@ -156,6 +158,8 @@ export function buildDecisionMarkdown(title: string, rows: readonly BriefRecomme
       const action = row.action === "add" ? "Добавить" : "Снизить частоту";
       lines.push(`- **${row.term}** — ${action}; зона: ${row.zoneLabel}; сейчас ${row.current}, ориентир ${row.target}, диапазон ${row.min}–${row.max}.`);
       for (const reason of row.reasons) lines.push(`  - Примечание: ${reason}`);
+      if (row.aiReason) lines.push(`  - Решение ИИ: ${row.aiReason}`);
+      if (row.aiSuggestion) lines.push(`  - Вариант правки: ${row.aiSuggestion}`);
     }
   }
   return lines.join("\n");
