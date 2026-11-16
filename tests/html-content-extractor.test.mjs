@@ -77,3 +77,24 @@ test("an explicit selector matching multiple containers is rejected", () => {
     /нашёл 2 элементов/u,
   );
 });
+
+test("VC.ru chooses main article among 16 content__body containers", () => {
+  const cards = Array.from({ length: 15 }, (_, i) =>
+    `<div class="content__body"><h2 class="content-title">Рекомендация ${i}</h2><article class="content__blocks"><p>Чужая публикация ${i}</p></article></div>`
+  ).join("");
+  const page = `<html lang="ru"><body>${cards}<div class="content__body"><h1 class="content-title">Аренда авто в Турции</h1><article class="content__blocks"><h2>Условия аренды</h2><p>Страховка, депозит, документы</p></article></div></body></html>`;
+  const result = extractHtmlContent(page, { url: "https://vc.ru/life/2716804-test" });
+  assert.equal(result.title, "Аренда авто в Турции");
+  assert.deepEqual(result.zones.h1.blocks, ["Аренда авто в Турции"]);
+  assert.deepEqual(result.zones.headings.blocks, ["Условия аренды"]);
+  assert.equal(result.zones.all.blocks.filter(x => x === result.title).length, 1);
+  assert.doesNotMatch(result.text, /Чужая публикация/);
+});
+
+test("VC.ru rejects two competing main articles", () => {
+  const article = title => `<div class="content__body"><h1 class="content-title">${title}</h1><article class="content__blocks"><p>Текст статьи</p></article></div>`;
+  assert.throws(
+    () => extractHtmlContent(`<html><body>${article("Первая")}${article("Вторая")}</body></html>`, { url: "https://vc.ru/life/123" }),
+    /не удалось однозначно определить основной материал/
+  );
+});

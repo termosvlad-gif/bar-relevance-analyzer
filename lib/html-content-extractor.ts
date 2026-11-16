@@ -346,8 +346,22 @@ export function extractHtmlContent(html: string, options: { url?: string; select
   if (selector) {
     const matches = querySelectorAll(root, selector);
     if (!matches.length) throw new Error(`Не найден контейнер по CSS-селектору «${selector}». Страница не будет анализироваться целиком.`);
-    if (matches.length > 1) throw new Error(`CSS-селектор «${selector}» нашёл ${matches.length} элементов. Уточните селектор, чтобы выбрать один контейнер.`);
-    selected = matches[0];
+    if (matches.length > 1 && profile !== "vc") throw new Error(`CSS-селектор «${selector}» нашёл ${matches.length} элементов. Уточните селектор, чтобы выбрать один контейнер.`);
+    if (profile === "vc" && matches.length > 1) {
+      const mainArticles = matches.filter((candidate) => {
+        const hasH1 = descendants(candidate, (node) =>
+          node.tag === "h1" && (node.attrs.class ?? "").split(/\s+/u).includes("content-title"),
+        ).length > 0;
+        const hasBody = descendants(candidate, (node) =>
+          node.tag === "article" && (node.attrs.class ?? "").split(/\s+/u).includes("content__blocks"),
+        ).length > 0;
+        return hasH1 && hasBody;
+      });
+      if (mainArticles.length !== 1) throw new Error(`VC.ru: найдено ${matches.length} контейнеров «${selector}», но не удалось однозначно определить основной материал.`);
+      selected = mainArticles[0];
+    } else {
+      selected = matches[0];
+    }
   } else {
     const body = descendants(root, (node) => node.tag === "body")[0] ?? root;
     const main = descendants(body, (node) => node.tag === "main")[0];
@@ -358,7 +372,7 @@ export function extractHtmlContent(html: string, options: { url?: string; select
   }
   const contentRoots = automaticHeader && !selector ? [automaticHeader, selected] : [selected];
 
-  const contentTitle = descendants(root, (node) => (node.attrs.class ?? "").split(/\s+/u).includes("content-title"))[0];
+  const contentTitle = descendants(selected, (node) => (node.attrs.class ?? "").split(/\s+/u).includes("content-title"))[0];
   const useArticleTitle = Boolean(contentTitle && (vc || isDescendantOrSelf(contentTitle, selected)));
   const title = useArticleTitle ? innerText(contentTitle!) : documentTitle(root);
   const titleSource: HtmlContentExtraction["titleSource"] = useArticleTitle ? "content-title" : title ? "document-title" : "none";
