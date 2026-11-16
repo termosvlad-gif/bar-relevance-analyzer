@@ -3,10 +3,11 @@ import * as stopwordModule from "stopword";
 import type { PhraseSimilarityProvider, PhraseSimilarityResult } from "./phrase-similarity";
 import { LANGUAGE_CONFIGS } from "./language-support";
 import { initializeRussianMorphology, russianLemma } from "./russian-morphology";
+import { extractHtmlContent } from "./html-content-extractor";
 
 export { LANGUAGE_CONFIGS } from "./language-support";
 
-export type PageInput = { name?: string; url?: string; text?: string; position?: number; title?: string };
+export type PageInput = { name?: string; url?: string; text?: string; position?: number; title?: string; selector?: string };
 export type SearchContext = {
   engine?: "google" | "yandex";
   region?: string;
@@ -107,6 +108,7 @@ type PreparedPage = {
   htmlLanguage: string;
   source: "http" | "firecrawl" | "text";
   qualityScore: number;
+  selector: string;
   zones: PreparedZones;
 };
 type DocumentAnalysis = {
@@ -418,69 +420,8 @@ function preferredForm(key: string, variants: Map<string, number> | undefined, q
     || key;
 }
 
-function decodeEntities(text: string) {
-  const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", ndash: "–", mdash: "—", laquo: "«", raquo: "»" };
-  return text.replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16)))
-    .replace(/&([a-z]+);/gi, (entity, name) => named[name.toLowerCase()] ?? entity);
-}
-
-function removeBlocks(html: string) {
-  return html.replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<(script|style|noscript|template|svg|canvas|nav|footer|aside|form|button|select|option|dialog)[^>]*>[\s\S]*?<\/\1>/gi, " ");
-}
-
-function markupBlocks(markup: string) {
-  return decodeEntities(removeBlocks(markup)
-    .replace(/<br\s*\/?\s*>/gi, "\n")
-    .replace(/<\/(?:p|div|li|h[1-6]|a|section|article|tr|td|th|blockquote|figure|figcaption)>/gi, "\n")
-    .replace(/<[^>]+>/g, " "))
-    .split(/\n+/)
-    .map((line) => line.replace(/[\t ]+/g, " ").trim())
-    .filter((line) => line.length >= 2);
-}
-
-function elementBlocks(markup: string, pattern: string) {
-  const blocks: string[] = [];
-  const expression = new RegExp(`<(?:${pattern})\\b[^>]*>([\\s\\S]*?)<\\/(?:${pattern})>`, "gi");
-  for (const match of markup.matchAll(expression)) blocks.push(...markupBlocks(match[1]));
-  return blocks;
-}
-
-function extractHtml(html: string) {
-  const title = markupBlocks(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "").join(" ");
-  const htmlLanguage = (html.match(/<html[^>]+lang=["']?([^"'\s>]+)/i)?.[1] ?? "").toLowerCase().split(/[-_]/)[0];
-  const headings = (html.match(/<h[1-6]\b/gi) ?? []).length;
-  const body = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1] ?? html;
-  const main = body.match(/<main[^>]*>([\s\S]*?)<\/main>/i)?.[1];
-  const article = body.match(/<article[^>]*>([\s\S]*?)<\/article>/i)?.[1];
-  const candidates = [main, article, body].filter((value): value is string => Boolean(value));
-  let source = candidates[candidates.length - 1];
-  for (const candidate of candidates) {
-    const roughText = removeBlocks(candidate).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    if (roughText.length >= 800) { source = candidate; break; }
-  }
-  const header = body.match(/<header\b[^>]*>([\s\S]*?)<\/header>/i)?.[0];
-  if (source !== body && header) source = `${header}\n${source}`;
-  const cleanedSource = removeBlocks(source);
-  const bodyBlocks = markupBlocks(cleanedSource);
-  const h1Blocks = elementBlocks(cleanedSource, "h1");
-  const headingBlocks = elementBlocks(cleanedSource, "h[2-6]");
-  const anchorBlocks = elementBlocks(cleanedSource, "a");
-  const textOnlyMarkup = cleanedSource
-    .replace(/<h[1-6]\b[^>]*>[\s\S]*?<\/h[1-6]>/gi, " ")
-    .replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, " ");
-  const textBlocks = markupBlocks(textOnlyMarkup);
-  const titleBlocks = title ? [title] : [];
-  const zones: PreparedZones = {
-    all: { available: true, blocks: [...titleBlocks, ...bodyBlocks] },
-    title: { available: true, blocks: titleBlocks },
-    h1: { available: true, blocks: h1Blocks },
-    headings: { available: true, blocks: headingBlocks },
-    text: { available: true, blocks: textBlocks },
-    anchors: { available: true, blocks: anchorBlocks },
-  };
-  return { title, text: bodyBlocks.join("\n"), headings, htmlLanguage, zones };
+function extractHtml(html: string, url?: string, selector?: string) {
+  return extractHtmlContent(html, { url, selector });
 }
 
 function limitPreparedZones(zones: PreparedZones): PreparedZones {
@@ -661,8 +602,8 @@ async function readResponseTextLimited(response: Response, maximumBytes: number)
   } finally { reader.releaseLock(); }
 }
 
-function evaluatedRemotePage(page: RawRemotePage, source: "http" | "firecrawl"): LoadedRemotePage {
-  const extracted = extractHtml(page.html);
+function evaluatedRemotePage(page: RawRemotePage, source: "http" | "firecrawl", selector?: string): LoadedRemotePage {
+  const extracted = extractHtml(page.html, page.finalUrl, selector);
   return { ...page, extracted, quality: assessPageQuality(page.html, extracted), source };
 }
 
@@ -670,7 +611,7 @@ function firecrawlKey() {
   return (process.env.FIRECRAWL_API_KEY || process.env.FIRECRAWL)?.trim() ?? "";
 }
 
-async function fetchFirecrawlPage(url: URL, key: string): Promise<LoadedRemotePage> {
+async function fetchFirecrawlPage(url: URL, key: string, selector?: string): Promise<LoadedRemotePage> {
   const response = await fetch("https://api.firecrawl.dev/v2/scrape", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", Accept: "application/json" },
@@ -693,17 +634,24 @@ async function fetchFirecrawlPage(url: URL, key: string): Promise<LoadedRemotePa
   const candidates = [payload.data?.html, payload.data?.rawHtml].filter((html): html is string => Boolean(html?.trim()));
   if (!candidates.length) throw new Error("Firecrawl не вернул HTML страницы");
 
-  const assessed = candidates.map((html) => evaluatedRemotePage({
-    html: html.slice(0, MAX_REMOTE_LENGTH), finalUrl: url.toString(), truncated: html.length > MAX_REMOTE_LENGTH,
-  }, "firecrawl")).sort((left, right) => right.quality.score - left.quality.score);
-  return assessed[0];
+  const assessed: LoadedRemotePage[] = [];
+  let extractionError: unknown;
+  for (const html of candidates) {
+    try {
+      assessed.push(evaluatedRemotePage({
+        html: html.slice(0, MAX_REMOTE_LENGTH), finalUrl: url.toString(), truncated: html.length > MAX_REMOTE_LENGTH,
+      }, "firecrawl", selector));
+    } catch (error) { extractionError = error; }
+  }
+  if (!assessed.length) throw extractionError instanceof Error ? extractionError : new Error("Не удалось извлечь выбранный контейнер из HTML Firecrawl");
+  return assessed.sort((left, right) => right.quality.score - left.quality.score)[0];
 }
 
-async function fetchPage(rawUrl: string, useFirecrawl: boolean): Promise<LoadedRemotePage> {
+async function fetchPage(rawUrl: string, useFirecrawl: boolean, selector?: string): Promise<LoadedRemotePage> {
   const validatedUrl = validateRemoteUrl(rawUrl);
   let directFailure: Error | null = null;
   try {
-    const direct = evaluatedRemotePage(await fetchDirectPage(validatedUrl), "http");
+    const direct = evaluatedRemotePage(await fetchDirectPage(validatedUrl), "http", selector);
     if (direct.quality.accepted) return direct;
     directFailure = new PagePreparationError("low_quality", direct.quality.reason, "http");
   } catch (error) {
@@ -718,7 +666,7 @@ async function fetchPage(rawUrl: string, useFirecrawl: boolean): Promise<LoadedR
   }
 
   try {
-    const fallback = await fetchFirecrawlPage(validatedUrl, key);
+    const fallback = await fetchFirecrawlPage(validatedUrl, key, selector);
     if (fallback.quality.accepted) return fallback;
     throw new PagePreparationError("low_quality", `Firecrawl: ${fallback.quality.reason}`, "firecrawl");
   } catch (error) {
@@ -728,6 +676,46 @@ async function fetchPage(rawUrl: string, useFirecrawl: boolean): Promise<LoadedR
       : `прямая загрузка: ${directFailure?.message || "ошибка HTTP"}`;
     throw new PagePreparationError("fetch_failed", `${directMessage}; Firecrawl: ${error instanceof Error ? error.message : "ошибка загрузки"}`, "firecrawl");
   }
+}
+
+export async function previewPageExtraction(rawUrl: string, selector?: string) {
+  const validatedUrl = validateRemoteUrl(rawUrl);
+  let loaded: LoadedRemotePage;
+  try {
+    const direct = evaluatedRemotePage(await fetchDirectPage(validatedUrl), "http", selector);
+    loaded = direct;
+    if (!direct.quality.accepted && firecrawlKey()) {
+      try {
+        const fallback = await fetchFirecrawlPage(validatedUrl, firecrawlKey(), selector);
+        if (fallback.quality.score > direct.quality.score || fallback.quality.accepted) loaded = fallback;
+      } catch { /* Keep the direct preview and expose its quality warning. */ }
+    }
+  } catch (error) {
+    if (error instanceof UnsafeRemoteUrlError) throw error;
+    const key = firecrawlKey();
+    if (!key) throw error;
+    loaded = await fetchFirecrawlPage(validatedUrl, key, selector);
+  }
+  const extracted = loaded.extracted;
+  return {
+    url: loaded.finalUrl,
+    source: loaded.source,
+    profile: extracted.profile,
+    selector: extracted.selector,
+    title: extracted.title,
+    titleSource: extracted.titleSource,
+    h1: extracted.zones.h1.blocks[0] ?? "",
+    headings: extracted.zones.headings.blocks.slice(0, 12),
+    headingCount: extracted.headings,
+    textBlockCount: extracted.textBlocks,
+    linkCount: extracted.linkCount,
+    wordCount: loaded.quality.words,
+    qualityAccepted: loaded.quality.accepted,
+    qualityScore: loaded.quality.score,
+    qualityReason: loaded.quality.accepted ? "" : loaded.quality.reason,
+    truncated: loaded.truncated,
+    textPreview: extracted.text.slice(0, 2_000),
+  };
 }
 
 async function prepareInput(input: PageInput, fallbackName: string, useFirecrawl: boolean): Promise<PreparedPage> {
@@ -742,7 +730,8 @@ async function prepareInput(input: PageInput, fallbackName: string, useFirecrawl
   let zones = plainTextZones(text);
   if (!text) {
     if (!url) throw new Error("Нужен URL или текст страницы");
-    const fetched = await fetchPage(url, useFirecrawl);
+    const selector = input.selector?.trim() || undefined;
+    const fetched = await fetchPage(url, useFirecrawl, selector);
     url = fetched.finalUrl;
     truncated = fetched.truncated;
     const extracted = fetched.extracted;
@@ -758,12 +747,12 @@ async function prepareInput(input: PageInput, fallbackName: string, useFirecrawl
   zones = limitPreparedZones(zones);
   if (text.length < 80) throw new Error("На странице слишком мало извлечённого текста");
   const name = input.name?.trim() || title || (url ? new URL(url).hostname : fallbackName);
-  return { name, url, position: input.position, title, text, headings, truncated, htmlLanguage, source, qualityScore, zones };
+  return { name, url, position: input.position, title, text, headings, truncated, htmlLanguage, source, qualityScore, selector: input.selector?.trim() || "", zones };
 }
 
 async function prepareFirecrawlRetry(page: PreparedPage, key: string): Promise<PreparedPage> {
   if (!page.url) throw new PagePreparationError("fetch_failed", "Для повторной загрузки Firecrawl нужен URL", "firecrawl");
-  const loaded = await fetchFirecrawlPage(validateRemoteUrl(page.url), key);
+  const loaded = await fetchFirecrawlPage(validateRemoteUrl(page.url), key, page.selector || undefined);
   if (!loaded.quality.accepted) throw new PagePreparationError("low_quality", `Firecrawl: ${loaded.quality.reason}`, "firecrawl");
   let text = loaded.extracted.text;
   let truncated = loaded.truncated;

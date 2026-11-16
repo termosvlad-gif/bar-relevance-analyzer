@@ -37,7 +37,7 @@ const FRAGMENT_PHRASES = new Map<string, string>([
 ]);
 
 function unescapeMarkdown(value: string): string {
-  return value.replace(/\\([\\`*_{}\[\]()#+\-.!>])/gu, "$1").trim();
+  return value.replace(/\\([\\`*_{}[\]()#+\-.!>])/gu, "$1").trim();
 }
 
 function zoneFromHeading(heading: string): { key: BriefZoneKey; label: string } {

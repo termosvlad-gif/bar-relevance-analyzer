@@ -17,7 +17,28 @@ type SearchEngine = "google" | "yandex";
 type Device = "desktop" | "tablet" | "mobile";
 type StatusValue = "Добавить" | "Норма" | "Снизить";
 type ZoneKey = "all" | "title" | "h1" | "text" | "headings" | "anchors";
-type PageDraft = { name: string; mode: InputMode; url: string; text: string };
+type PageDraft = { name: string; mode: InputMode; url: string; text: string; selector: string };
+type ExtractionPreview = {
+  requestUrl: string;
+  requestSelector: string;
+  url: string;
+  source: "http" | "firecrawl";
+  profile: "vc" | "custom" | "automatic";
+  selector: string;
+  title: string;
+  titleSource: "content-title" | "document-title" | "none";
+  h1: string;
+  headings: string[];
+  headingCount: number;
+  textBlockCount: number;
+  linkCount: number;
+  wordCount: number;
+  qualityAccepted: boolean;
+  qualityScore: number;
+  qualityReason: string;
+  truncated: boolean;
+  textPreview: string;
+};
 type NgramNestingParent = { key: string; phrase: string; occurrences: number; sites: number; share: number };
 type NgramNesting = {
   classification: "independent" | "partially_nested" | "fully_nested" | "insufficient_evidence";
@@ -506,17 +527,58 @@ function profileLemmaCount(profile: ComparisonProfile | undefined, row: TermRow,
   return countUp(match?.count);
 }
 
-function PageEditor({ draft, onChange }: { draft: PageDraft; onChange: (draft: PageDraft) => void }) {
+function PageEditor({
+  draft, onChange, preview, previewLoading, previewError, onPreview,
+}: {
+  draft: PageDraft;
+  onChange: (draft: PageDraft) => void;
+  preview: ExtractionPreview | null;
+  previewLoading: boolean;
+  previewError: string;
+  onPreview: () => void;
+}) {
+  const previewIsCurrent = preview?.requestUrl === draft.url.trim() && preview?.requestSelector === draft.selector.trim();
   return <div className={styles.pageEditor}>
     <div className={styles.modeSwitch} aria-label="Способ добавления своей страницы">
       <button type="button" title="Загрузить и разобрать страницу по публичному URL" className={draft.mode === "url" ? styles.activeMode : ""} onClick={() => onChange({ ...draft, mode: "url" })}>По URL</button>
       <button type="button" title="Проанализировать вставленный текст без загрузки страницы" className={draft.mode === "text" ? styles.activeMode : ""} onClick={() => onChange({ ...draft, mode: "text" })}>Вставить текст</button>
     </div>
-    {draft.mode === "url" ? <label className={styles.field}>
-      <span>URL вашей страницы</span>
-      <input className={styles.input} type="url" required value={draft.url} onChange={(event) => onChange({ ...draft, url: event.target.value })} placeholder="https://example.com/page" />
-      <small>Домен будет исключён из поисковой выдачи.</small>
-    </label> : <label className={styles.field}>
+    {draft.mode === "url" ? <>
+      <label className={styles.field}>
+        <span>URL вашей страницы</span>
+        <input className={styles.input} type="url" required value={draft.url} onChange={(event) => onChange({ ...draft, url: event.target.value })} placeholder="https://example.com/page" />
+        <small>Домен будет исключён из поисковой выдачи.</small>
+      </label>
+      <label className={styles.field}>
+        <span>CSS-селектор области анализа · необязательно</span>
+        <input className={styles.input} type="text" value={draft.selector} onChange={(event) => onChange({ ...draft, selector: event.target.value })} placeholder="Автоматически; для VC.ru — .content__body" maxLength={300} />
+        <small>Для VC.ru БАР автоматически выберет .content__body и возьмёт заголовок из .content-title. Для другого сайта укажите один CSS-селектор контейнера. Поддерживаются классы, ID, теги, атрибуты, потомки и прямые дети; псевдоклассы не поддерживаются. Пустое поле сохраняет автоматический выбор основной области.</small>
+      </label>
+      <div className={styles.extractActions}>
+        <button className={styles.ghostButton} type="button" onClick={onPreview} disabled={!draft.url.trim() || previewLoading}>
+          {previewLoading ? "Извлекаем…" : "Проверить область извлечения"}
+        </button>
+        <span>Проверка не запускает поиск конкурентов и не расходует запросы XMLRiver.</span>
+      </div>
+      {previewError && <div className={styles.error} role="alert">{previewError}</div>}
+      {previewIsCurrent && preview && <div className={styles.extractPreview}>
+        <div className={styles.extractPreviewHead}>
+          <strong>Предварительный просмотр извлечения</strong>
+          <span className={preview.qualityAccepted ? styles.extractReady : styles.extractWarning}>{preview.qualityAccepted ? "Контент получен" : "Нужна проверка качества"}</span>
+        </div>
+        <div className={styles.extractSelector}><code>{preview.selector}</code><span>{preview.profile === "vc" ? "Профиль VC.ru" : preview.profile === "custom" ? "Пользовательский селектор" : "Автоматический выбор"}</span></div>
+        <div className={styles.extractTitle}><small>Title / H1 · {preview.titleSource === "content-title" ? ".content-title" : preview.titleSource === "document-title" ? "метатег title" : "не найден"}</small><strong>{preview.title || "Заголовок не найден"}</strong></div>
+        <div className={styles.extractStats}>
+          <span><b>{preview.wordCount}</b> слов</span>
+          <span><b>{preview.headingCount}</b> заголовков</span>
+          <span><b>{preview.textBlockCount}</b> текстовых блоков</span>
+          <span><b>{preview.linkCount}</b> ссылок</span>
+        </div>
+        {preview.qualityReason && <small className={styles.extractQuality}>{preview.qualityReason} · оценка {preview.qualityScore}/100</small>}
+        {preview.truncated && <small className={styles.extractQuality}>HTML страницы был обрезан по установленному лимиту размера.</small>}
+        <details className={styles.extractDetails}><summary>Показать извлечённый текст</summary><pre>{preview.textPreview || "Текстовые блоки не найдены."}</pre></details>
+      </div>}
+    </> : <label className={styles.field}>
       <span>Текст вашей страницы</span>
       <textarea className={styles.textarea} required value={draft.text} onChange={(event) => onChange({ ...draft, text: event.target.value })} placeholder="Вставьте основной текст страницы…" maxLength={200000} />
       <small>{integer.format(draft.text.length)} / 200 000 символов</small>
@@ -660,7 +722,10 @@ export default function AnalyzerPage() {
   const [competitorCount, setCompetitorCount] = useState(10);
   const [stopWords, setStopWords] = useState(INITIAL_STOP_TERMS.words);
   const [stopPhrases, setStopPhrases] = useState(INITIAL_STOP_TERMS.phrases);
-  const [ownPage, setOwnPage] = useState<PageDraft>({ name: "Наша страница", mode: "url", url: "", text: "" });
+  const [ownPage, setOwnPage] = useState<PageDraft>({ name: "Наша страница", mode: "url", url: "", text: "", selector: "" });
+  const [extractionPreview, setExtractionPreview] = useState<ExtractionPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
   const [serverConfigured, setServerConfigured] = useState<boolean | null>(null);
   const [firecrawlConfigured, setFirecrawlConfigured] = useState<boolean | null>(null);
   const [countryOptions, setCountryOptions] = useState<RegionOption[]>([]);
@@ -840,6 +905,26 @@ export default function AnalyzerPage() {
     setChartLimit(CHART_PAGE_SIZE);
   };
 
+  const previewExtraction = async () => {
+    if (!ownPage.url.trim() || previewLoading) return;
+    setPreviewLoading(true);
+    setPreviewError("");
+    setExtractionPreview(null);
+    try {
+      const response = await fetch("/api/extract-preview", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: ownPage.url.trim(), selector: ownPage.selector.trim() }),
+      });
+      const data = await response.json() as Omit<ExtractionPreview, "requestUrl" | "requestSelector"> & { error?: string };
+      if (!response.ok) throw new Error(data.error || "Не удалось извлечь содержимое страницы");
+      setExtractionPreview({ ...data, requestUrl: ownPage.url.trim(), requestSelector: ownPage.selector.trim() });
+    } catch (cause) {
+      setPreviewError(cause instanceof Error ? cause.message : "Не удалось извлечь содержимое страницы");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!canAnalyze) return;
@@ -858,7 +943,7 @@ export default function AnalyzerPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           serpQuery, queries: parseKeys(analysisKeys, serpQuery), stopWords: parseStops(stopWords), stopPhrases: parseStops(stopPhrases), language,
-          ownPage: { name: ownPage.name, url: ownPage.mode === "url" ? ownPage.url : "", text: ownPage.mode === "text" ? ownPage.text : "" },
+          ownPage: { name: ownPage.name, url: ownPage.mode === "url" ? ownPage.url : "", text: ownPage.mode === "text" ? ownPage.text : "", selector: ownPage.mode === "url" ? ownPage.selector : "" },
           competitors: searchData.competitors.map((item) => ({ name: item.name, title: item.title, url: item.url, position: item.position })),
           search: { engine, region: searchData.region?.displayLabel || searchData.region?.label || region, device, found: searchData.competitors.length },
         }),
@@ -942,7 +1027,7 @@ export default function AnalyzerPage() {
     if (!pageBrief) return;
     try {
       sessionStorage.setItem("bar:seo-editor:brief:v1", pageBrief);
-      sessionStorage.setItem("bar:seo-editor:source:v1", JSON.stringify({ mode: ownPage.mode, url: ownPage.mode === "url" ? ownPage.url : "" }));
+      sessionStorage.setItem("bar:seo-editor:source:v1", JSON.stringify({ mode: ownPage.mode, url: ownPage.mode === "url" ? ownPage.url : "", selector: ownPage.mode === "url" ? ownPage.selector : "" }));
       if (ownPage.mode === "text" && ownPage.text.trim()) {
         sessionStorage.setItem("bar:seo-editor:article:v1", ownPage.text);
       } else {
@@ -994,7 +1079,7 @@ export default function AnalyzerPage() {
               </div>
               <p className={`${styles.connectionStatus} ${firecrawlConfigured ? styles.connectionReady : firecrawlConfigured === false ? styles.connectionOptional : ""}`} role="status"><i />{firecrawlConfigured === null ? "Проверяем дополнительное подключение…" : firecrawlConfigured ? "Подключён — fallback включается автоматически после неудачной обычной загрузки" : "Не подключён — обычная загрузка продолжит работать без fallback"}</p>
             </aside>
-            <PageEditor draft={ownPage} onChange={setOwnPage} />
+            <PageEditor draft={ownPage} onChange={(draft) => { setOwnPage(draft); setExtractionPreview(null); setPreviewError(""); }} preview={extractionPreview} previewLoading={previewLoading} previewError={previewError} onPreview={previewExtraction} />
           </section>
           <section className={`${styles.card} ${styles.stopCard}`}>
             <div className={styles.cardHead}><div><span className={styles.step}>03 · Исключения</span><h2>Стоп-слова и стоп-фразы</h2></div><span className={styles.subtle}>необязательно</span></div>

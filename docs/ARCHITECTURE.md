@@ -7,6 +7,7 @@
 браузер
   ├─ подсказки регионов ──> /api/xmlriver-regions ──> полный локальный snapshot XMLRiver
   ├─ поиск конкурентов ──> /api/search-competitors ──> XMLRiver (BYOK)
+  ├─ предпросмотр URL ────> /api/extract-preview ──> выбранный HTML-контейнер
   └─ запуск анализа ─────> /api/analyze-run
                               ├─ обычная HTTP-загрузка страниц
                               ├─ Firecrawl fallback (BYOK, автоматически при наличии ключа)
@@ -18,7 +19,9 @@
 ## Основные каталоги
 
 - `app/analyzer` — форма анализа и интерактивный отчёт;
-- `app/api` — server-side маршруты поиска и основного анализа;
+- `app/api` — server-side маршруты поиска, предпросмотра извлечения и основного анализа;
+- `lib/html-content-extractor.ts` — безопасный ограниченный HTML-разбор, CSS-селекторы,
+  профили извлечения VC.ru и построение зон Title/H1/H2–H6/Text/Anchors;
 - `lib/semantic-analysis.ts` — загрузка, очистка, морфологическая нормализация, N-граммы,
   зональные метрики и построение snapshot;
 - `lib/language-support.ts` — единый реестр языков для backend и UI с явным

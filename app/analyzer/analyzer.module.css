@@ -91,6 +91,26 @@
 .modeSwitch { display: inline-flex; justify-self: start; padding: 3px; border-radius: 8px; background: var(--soft); }
 .modeSwitch button { padding: 7px 11px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 10px; cursor: pointer; }
 .modeSwitch button.activeMode { background: #fff; color: var(--ink); font-weight: 750; box-shadow: 0 1px 5px #15171118; }
+.extractActions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.extractActions button:disabled { opacity: .5; cursor: wait; }
+.extractActions > span { color: var(--muted); font-size: 9px; line-height: 1.4; }
+.extractPreview { min-width: 0; padding: 14px; display: grid; gap: 10px; border: 1px solid #d8ddc7; border-radius: 10px; background: #fbfcf7; }
+.extractPreviewHead { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.extractPreviewHead > strong { font-size: 11px; }
+.extractReady, .extractWarning { flex: 0 0 auto; font-size: 9px; font-weight: 750; }
+.extractReady { color: #52701e; }
+.extractWarning { color: #93631a; }
+.extractSelector { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--muted); font-size: 9px; }
+.extractSelector code { padding: 4px 7px; border-radius: 5px; background: #eceee6; color: #41473a; font: 10px/1.2 var(--font-geist-mono, monospace); }
+.extractTitle { display: grid; gap: 4px; }
+.extractTitle small, .extractQuality { color: var(--muted); font-size: 9px; line-height: 1.4; }
+.extractTitle strong { font-size: 12px; line-height: 1.45; }
+.extractStats { display: flex; flex-wrap: wrap; gap: 7px; }
+.extractStats span { padding: 6px 8px; border-radius: 6px; background: #f0f1eb; color: #5c6257; font-size: 9px; }
+.extractStats b { color: var(--ink); font: 750 10px/1 var(--font-geist-mono, monospace); }
+.extractDetails { border-top: 1px solid #e0e2d9; padding-top: 8px; }
+.extractDetails summary { color: #51439a; font-size: 9px; font-weight: 750; cursor: pointer; }
+.extractDetails pre { max-height: 230px; margin: 8px 0 0; padding: 10px; overflow: auto; border-radius: 7px; background: #f0f1eb; color: #34392f; font: 10px/1.5 var(--font-geist-mono, monospace); white-space: pre-wrap; overflow-wrap: anywhere; }
 .credentialsBody { padding-top: 13px; margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; border-top: 1px solid #dcddd6; }
 .credentialsBody > small { grid-column: 1 / -1; color: var(--muted); font-size: 9px; line-height: 1.4; }
 .actions { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 18px; align-items: center; }
