@@ -1100,7 +1100,7 @@ function localSemanticScore(label: string, key: string, occurrenceVector: number
 }
 
 type NgramSemanticInput = Pick<BaseRow, "key" | "label" | "frequencies">;
-type NgramSemanticValue = { keySimilarity: number; bestKeyword: string; source?: "local" | "e5" };
+type NgramSemanticValue = { keySimilarity: number; bestKeyword: string };
 type NgramSemanticResolution = {
   values: Map<string, NgramSemanticValue>;
   source: "e5-service" | "e5-cache" | "local";
@@ -1119,10 +1119,10 @@ function exactKeyword(key: string, profiles: ReturnType<typeof keywordProfiles>)
   return profiles.find((profile) => profile.ngramKeys.has(key))?.keyword;
 }
 
-function localNgramSemantics(rows: NgramSemanticInput[], profiles: ReturnType<typeof keywordProfiles>, language: string): Map<string, NgramSemanticValue> {
+function localNgramSemantics(rows: NgramSemanticInput[], profiles: ReturnType<typeof keywordProfiles>, language: string) {
   return new Map(rows.map((row) => [
     row.key,
-    { ...localSemanticScore(row.label, row.key, row.frequencies, profiles, language), source: "local" as const },
+    localSemanticScore(row.label, row.key, row.frequencies, profiles, language),
   ]));
 }
 
@@ -1155,8 +1155,8 @@ async function resolveNgramSemantics(input: {
       matched += 1;
       const exact = exactKeyword(row.key, input.profiles);
       values.set(row.key, exact
-        ? { keySimilarity: 1, bestKeyword: exact, source: "e5" as const }
-        : { keySimilarity: cached[2], bestKeyword: input.queries[cached[3]] ?? input.queries[0] ?? "", source: "e5" as const });
+        ? { keySimilarity: 1, bestKeyword: exact }
+        : { keySimilarity: cached[2], bestKeyword: input.queries[cached[3]] ?? input.queries[0] ?? "" });
     }
     return matched
       ? { values, source: "e5-cache", model: cache.model, revision: cache.revision, coverage: matched / Math.max(1, input.rows.length) }
@@ -1196,8 +1196,8 @@ async function resolveNgramSemantics(input: {
     cacheRows.push([row.key, row.label, score, item.queryIndex]);
     const exact = exactKeyword(row.key, input.profiles);
     values.set(row.key, exact
-      ? { keySimilarity: 1, bestKeyword: exact, source: "e5" as const }
-      : { keySimilarity: score, bestKeyword: input.queries[item.queryIndex] ?? input.queries[0] ?? "", source: "e5" as const });
+      ? { keySimilarity: 1, bestKeyword: exact }
+      : { keySimilarity: score, bestKeyword: input.queries[item.queryIndex] ?? input.queries[0] ?? "" });
   }
   return {
     values,
@@ -2259,7 +2259,6 @@ export async function analyzePayload(payload: AnalyzeRequest, dependencies: Anal
       competitorTfidf: round(row.competitorTfidf, 3), tfidfNormalized: round(tfidfNormalized, 3), keySimilarity: round(semantic.keySimilarity, 3),
       importance: round(Math.max(1, importance), 1), priority: round(priority, 1), bestKeyword: semantic.bestKeyword,
       keywordHit: exactQueryMatch,
-      semanticSource: semantic.source ?? "local",
       keyMatch: exactQueryMatch ? "exact" : semantic.keySimilarity > 0.8 ? "possible" : "none",
       status: normalizedStatus,
       nesting: ngramNestingReport(row.key, competitors, ownPage, ngramLabels),

@@ -103,7 +103,6 @@ type NgramRow = SemanticRow & {
   priority: number;
   bestKeyword: string;
   keyMatch?: "exact" | "possible" | "none";
-  semanticSource?: "local" | "e5";
   isExactKeyword?: boolean;
   nesting?: NgramNesting;
   nestedChildren?: Array<{ key: string; phrase: string; occurrences: number }>;
@@ -497,15 +496,6 @@ function safeBriefTask(
   return phrase.isExactKeyword === true || phrase.keyMatch === "exact";
 }
 
-function supplementalBriefPhrase(row: NgramRow) {
-  return adjustmentAction(row) === "Добавить"
-    && row.semanticSource === "e5"
-    && row.keyMatch === "possible"
-    && row.keySimilarity >= 0.86
-    && row.sites >= 3
-    && row.importance >= 40;
-}
-
 function buildPageBrief(result: AnalysisResult) {
   const lines = [`# ТЗ для страницы: ${result.meta.serpQuery}`, "", "Работайте по зонам: сначала исправляйте фразы, затем отдельные леммы."];
   let taskCount = 0;
@@ -538,29 +528,6 @@ function buildPageBrief(result: AnalysisResult) {
     }
   }
   if (!taskCount) lines.push("", "Нет автоматических заданий высокой уверенности. Остальные отклонения доступны в аналитических таблицах и требуют редакторской проверки.");
-  const extras = ngramsForZone(result, "text")
-    .filter(supplementalBriefPhrase)
-    .sort((a, b) =>
-      b.keySimilarity - a.keySimilarity
-      || b.sites - a.sites
-      || b.importance - a.importance
-    )
-    .slice(0, 12);
-
-  if (extras.length) {
-    lines.push(
-      "",
-      "## Дополнительная семантика — на проверку",
-      "",
-      "Это кандидаты, а не обязательные правки. Проверьте их соответствие теме статьи."
-    );
-    for (const row of extras) {
-      lines.push(
-        `- **${escapeMarkdown(row.phrase)}** — сходство E5 ${Math.round(row.keySimilarity * 100)}%, конкурентов: ${countUp(row.sites)}.`
-      );
-    }
-  }
-
   return lines.join("\n");
 }
 

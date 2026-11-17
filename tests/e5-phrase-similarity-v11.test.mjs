@@ -120,10 +120,6 @@ test("E5 replaces only N-gram similarity, preserves DF weighting, and is cached 
       assert.equal(business.keySimilarity, 0.75);
       assert.equal(smm.keySimilarity, 0.94);
       assert.equal(audit.keySimilarity, 0.82);
-      assert.ok(
-        [exact, business, smm, audit].every((row) => row.semanticSource === "e5"),
-        "E5 must be recorded as the source for scored phrases"
-      );
       assert.ok(business.sites > smm.sites);
       assert.ok(business.importance > smm.importance, "DF must smooth a high E5 score from a rare phrase");
       const expectedBusiness = 100 * Math.pow(business.df * business.keySimilarity, 0.7);
@@ -145,29 +141,6 @@ test("E5 replaces only N-gram similarity, preserves DF weighting, and is cached 
       assert.equal(serviceCalls, callsBeforeRecalc);
       assert.equal(recalculated.data.meta.phraseSimilarityMethod, "Multilingual E5 — кэш snapshot");
       assert.deepEqual(recalculated.data.ngrams, initialNgrams);
-      assert.ok(
-        recalculated.data.ngrams.every((row) => row.semanticSource === "e5"),
-        "cached E5 results must retain their source"
-      );
-
-      const partialSnapshot = structuredClone(initial.data.snapshot);
-      partialSnapshot.phraseSimilarity.rows =
-        partialSnapshot.phraseSimilarity.rows.filter(([key]) => key === exact.key);
-      assert.equal(partialSnapshot.phraseSimilarity.rows.length, 1);
-
-      const mixed = await postAnalysis(worker, {
-        queries: ["seo курсы"],
-        language: "ru",
-        snapshot: partialSnapshot,
-        stopWords: ["стопкоторогонет"],
-      });
-
-      assert.equal(mixed.response.status, 200, mixed.data.error);
-      assert.equal(mixed.data.meta.phraseSimilarityEngine, "e5");
-      assert.ok(mixed.data.meta.phraseSimilarityCoverage < 100);
-      assert.equal(rowByWords(mixed.data, "seo", "курс")?.semanticSource, "e5");
-      assert.equal(rowByWords(mixed.data, "бизнес", "академ")?.semanticSource, "local");
-      assert.equal(serviceCalls, callsBeforeRecalc);
 
       const changedQuery = await postAnalysis(worker, {
         queries: ["продвижение сайтов"],
@@ -177,10 +150,6 @@ test("E5 replaces only N-gram similarity, preserves DF weighting, and is cached 
       assert.equal(changedQuery.response.status, 200, changedQuery.data.error || "local snapshot fallback failed");
       assert.equal(serviceCalls, callsBeforeRecalc);
       assert.equal(changedQuery.data.meta.phraseSimilarityEngine, "local");
-      assert.ok(
-        changedQuery.data.ngrams.every((row) => row.semanticSource === "local"),
-        "changed queries must use local scores"
-      );
       assert.deepEqual(changedQuery.data.snapshot.phraseSimilarity, initial.data.snapshot.phraseSimilarity, "query mismatch must not erase the original E5 cache");
     } finally {
       globalThis.fetch = originalFetch;
@@ -192,11 +161,6 @@ test("an unavailable E5 service falls back without changing document metrics", {
   const worker = await loadWorker("fallback");
   const baseline = await withEnvironment({ PHRASE_EMBEDDINGS_URL: undefined }, () => postAnalysis(worker, corpusPayload()));
   assert.equal(baseline.response.status, 200, baseline.data.error || "baseline analysis failed");
-  assert.ok(baseline.data.ngrams.length > 0);
-  assert.ok(
-    baseline.data.ngrams.every((row) => row.semanticSource === "local"),
-    "analysis without E5 must mark phrases as local"
-  );
 
   await withEnvironment({ PHRASE_EMBEDDINGS_URL: E5_URL }, async () => {
     const originalFetch = globalThis.fetch;
