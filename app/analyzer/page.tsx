@@ -480,31 +480,15 @@ function adjustmentAction(row: SemanticRow) {
   return "";
 }
 
-function safeBriefTask(
-  row: SemanticRow,
-  zone: ZoneKey,
-  kind: "phrase" | "lemma",
-) {
-  if (adjustmentAction(row) !== "Добавить") return false;
-  if (zone !== "text" && zone !== "headings") return false;
-
-  if (kind === "lemma") {
-    return zone === "text" && row.keywordHit === true;
-  }
-
-  const phrase = row as NgramRow;
-  return phrase.isExactKeyword === true || phrase.keyMatch === "exact";
-}
-
 function buildPageBrief(result: AnalysisResult) {
   const lines = [`# ТЗ для страницы: ${result.meta.serpQuery}`, "", "Работайте по зонам: сначала исправляйте фразы, затем отдельные леммы."];
   let taskCount = 0;
   for (const zone of ZONES) {
     const phraseRows = ngramsForZone(result, zone.key)
-      .filter((row) => safeBriefTask(row, zone.key, "phrase"))
+      .filter((row) => adjustmentAction(row))
       .sort((left, right) => right.importance - left.importance || left.phrase.localeCompare(right.phrase, "ru"));
     const lemmaRows = termsForZone(result, zone.key)
-      .filter((row) => safeBriefTask(row, zone.key, "lemma"))
+      .filter((row) => adjustmentAction(row))
       .sort((left, right) => right.importance - left.importance || left.term.localeCompare(right.term, "ru"));
     if (!phraseRows.length && !lemmaRows.length) continue;
     lines.push("", `## ${zone.label} — ${zone.hint}`);
@@ -527,7 +511,7 @@ function buildPageBrief(result: AnalysisResult) {
       }
     }
   }
-  if (!taskCount) lines.push("", "Нет автоматических заданий высокой уверенности. Остальные отклонения доступны в аналитических таблицах и требуют редакторской проверки.");
+  if (!taskCount) lines.push("", "Страница уже находится в рекомендуемых диапазонах. Обязательных правок нет.");
   return lines.join("\n");
 }
 
