@@ -718,6 +718,25 @@ export async function previewPageExtraction(rawUrl: string, selector?: string) {
   };
 }
 
+/**
+ * Fetch the complete source article for BAR Agent.
+ * Uses the same extraction, selector and quality checks as BAR analysis.
+ * Does not modify or recalculate the original semantic report.
+ */
+export async function extractAgentSourceArticle(rawUrl: string, selector?: string) {
+  const loaded = await fetchPage(rawUrl, Boolean(firecrawlKey()), selector);
+  const extracted = loaded.extracted;
+
+  return {
+    url: loaded.finalUrl,
+    title: extracted.title,
+    text: extracted.text,
+    headings: extracted.zones.headings.blocks,
+    source: loaded.source,
+    truncated: loaded.truncated,
+  };
+}
+
 async function prepareInput(input: PageInput, fallbackName: string, useFirecrawl: boolean): Promise<PreparedPage> {
   let text = input.text?.trim() ?? "";
   let url = input.url?.trim() ?? "";

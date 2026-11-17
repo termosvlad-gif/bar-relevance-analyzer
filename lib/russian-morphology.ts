@@ -81,7 +81,11 @@ export function initializeRussianMorphology(assetOrigin?: string) {
           callback(new Error(`Неизвестный файл словаря: ${name}`));
           return;
         }
-        fetch(new URL(asset, assetOrigin)).then(async (response) => {
+        const assetUrl = new URL(asset, assetOrigin);
+        if (assetUrl.hostname === "localhost" && assetUrl.protocol === "https:") {
+          assetUrl.protocol = "http:";
+        }
+        fetch(assetUrl).then(async (response) => {
           if (!response.ok) throw new Error(`Не удалось загрузить словарь ${name}: HTTP ${response.status}`);
           return responseType === "json" ? response.json() : response.arrayBuffer();
         }).then((data) => callback(null, data)).catch((error) => callback(error instanceof Error ? error : new Error(String(error))));

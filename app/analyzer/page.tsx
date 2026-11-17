@@ -1,4 +1,5 @@
 "use client";
+import { saveAgentHandoff } from "@/lib/agent/browser-store";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
@@ -10,6 +11,7 @@ import {
 import { CLOUD_LAYOUT_HEIGHT, CLOUD_LAYOUT_WIDTH, packCloudWords } from "@/lib/cloud-layout";
 import { LANGUAGE_OPTIONS, languageCapability } from "@/lib/language-support";
 import type { XmlRiverRegion } from "@/lib/xmlriver-regions";
+import { AGENT_TRANSFER_KEY, createAgentHandoff } from "@/lib/agent/bar-import";
 import styles from "./analyzer.module.css";
 
 type InputMode = "url" | "text";
@@ -769,12 +771,12 @@ export default function AnalyzerPage() {
     queueMicrotask(() => {
       // Purge credentials saved by older releases. XMLRiver access now lives
       // only for the lifetime of this browser tab.
-      try { localStorage.removeItem(XMLRIVER_STORAGE_KEY); } catch { /* Storage can be unavailable in hardened browsers. */ }
+
       try {
-        const saved = JSON.parse(sessionStorage.getItem(XMLRIVER_STORAGE_KEY) || "{}") as { user?: string; key?: string };
+        const saved = JSON.parse(localStorage.getItem(XMLRIVER_STORAGE_KEY) || sessionStorage.getItem(XMLRIVER_STORAGE_KEY) || "{}") as { user?: string; key?: string };
         setXmlUser(typeof saved.user === "string" ? saved.user : "");
         setXmlKey(typeof saved.key === "string" ? saved.key : "");
-      } catch { try { sessionStorage.removeItem(XMLRIVER_STORAGE_KEY); } catch { /* Keep credentials in memory only. */ } }
+      } catch { try { localStorage.removeItem(XMLRIVER_STORAGE_KEY); } catch { /* Keep credentials in memory only. */ } }
       finally { xmlCredentialsLoaded.current = true; }
       try {
         const rawStored = sessionStorage.getItem(REPORT_STORAGE_KEY);
@@ -803,9 +805,9 @@ export default function AnalyzerPage() {
     if (!xmlCredentialsLoaded.current) return;
     try {
       if (xmlUser.trim() && xmlKey.trim()) {
-        sessionStorage.setItem(XMLRIVER_STORAGE_KEY, JSON.stringify({ user: xmlUser, key: xmlKey }));
+        localStorage.setItem(XMLRIVER_STORAGE_KEY, JSON.stringify({ user: xmlUser, key: xmlKey }));
       } else {
-        sessionStorage.removeItem(XMLRIVER_STORAGE_KEY);
+        localStorage.removeItem(XMLRIVER_STORAGE_KEY);
       }
     } catch { /* Keep credentials in React state when browser storage is unavailable. */ }
   }, [xmlUser, xmlKey]);
@@ -1023,6 +1025,34 @@ export default function AnalyzerPage() {
     }
   };
 
+  const openAgent = async () => {
+    if (!result || !pageBrief) return;
+    // A restored report does not restore the form's URL. The report itself is authoritative.
+    const reportUrl = result.documents.find((document) => document.ours)?.url || "";
+    const mode = reportUrl ? "url" : "text";
+    const handoff = createAgentHandoff(result, pageBrief, {
+      mode,
+      url: reportUrl,
+      selector: ownPage.mode === "url" && ownPage.url.trim() === reportUrl ? ownPage.selector : "",
+      text: mode === "text" ? ownPage.text : "",
+    });
+    try {
+      // Do not leave a stale report behind if this one exceeds the browser quota.
+      await saveAgentHandoff(handoff);
+      window.location.assign("/agent");
+    } catch {
+      try { sessionStorage.removeItem(AGENT_TRANSFER_KEY); } catch { /* Storage unavailable. */ }
+      const blob = new Blob([JSON.stringify(handoff)], { type: "application/json;charset=utf-8" });
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = href;
+      link.download = "bar_agent_stage4_import.json";
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(href), 1_000);
+      setError("Не удалось сохранить отчёт в браузере. JSON скачан: откройте /agent и импортируйте его.");
+    }
+  };
+
   const openSeoEditor = () => {
     if (!pageBrief) return;
     try {
@@ -1057,7 +1087,7 @@ export default function AnalyzerPage() {
                 {serverConfigured === false && <a href="https://xmlriver.com/" target="_blank" rel="noreferrer">Подключить XMLRiver ↗</a>}
               </div>
               <p className={`${styles.connectionStatus} ${serverConfigured ? styles.connectionReady : serverConfigured === false ? styles.connectionMissing : ""}`} role="status"><i />{serverConfigured === null ? "Проверяем обязательное подключение…" : serverConfigured ? "Подключён на сервере — поиск конкурентов доступен" : "Не подключён — введите ID и ключ ниже"}</p>
-              {serverConfigured === false && <div className={styles.credentialsBody}><label className={styles.field}><span>ID пользователя</span><input className={styles.input} autoComplete="username" value={xmlUser} onChange={(event) => setXmlUser(event.target.value)} placeholder="user" /></label><label className={styles.field}><span>Ключ XMLRiver</span><input className={styles.input} type="password" autoComplete="current-password" value={xmlKey} onChange={(event) => setXmlKey(event.target.value)} placeholder="••••••••••••" /></label><small>Доступ хранится только до закрытия этой вкладки.</small></div>}
+              {serverConfigured === false && <div className={styles.credentialsBody}><label className={styles.field}><span>ID пользователя</span><input className={styles.input} autoComplete="username" value={xmlUser} onChange={(event) => setXmlUser(event.target.value)} placeholder="user" /></label><label className={styles.field}><span>Ключ XMLRiver</span><input className={styles.input} type="password" autoComplete="current-password" value={xmlKey} onChange={(event) => setXmlKey(event.target.value)} placeholder="••••••••••••" /></label><small>Доступ сохраняется в этом браузере. Не используйте общий компьютер.</small></div>}
             </aside>
             <label className={styles.field}><span>Запрос поисковой выдачи</span><input className={styles.input} required value={serpQuery} onChange={(event) => setSerpQuery(event.target.value)} placeholder="Например: seo курсы" /><small>По нему XMLRiver найдёт состав конкурентов.</small></label>
             <label className={styles.field}><span>Ключи для анализа</span><textarea className={`${styles.textarea} ${styles.keysTextarea}`} value={analysisKeys} onChange={(event) => setAnalysisKeys(event.target.value)} placeholder={'seo курсы\nобучение seo, курсы продвижения'} maxLength={3200} /><small>До 20 фраз через запятую или с новой строки. Если оставить пустым, используется запрос выдачи.</small></label>
@@ -1202,7 +1232,7 @@ export default function AnalyzerPage() {
         </section>
 
         <section className={`${styles.reportSection} ${styles.briefSection}`} aria-labelledby="page-brief-heading">
-          <div className={styles.sectionHead}><div><span className={styles.sectionIndex}>06</span><div className={styles.titleWithHelp}><h2 id="page-brief-heading">ТЗ для страницы</h2><HelpTip text="Готовый список правок можно вставить в редактор, задачу или передать другому агенту." /></div><p>Готовый Markdown сгруппирован по HTML-зонам. В каждой зоне сначала идут фразы, затем отдельные леммы; строки в рекомендуемом диапазоне не добавляются.</p></div><button className={styles.copyBrief} type="button" title="Скопировать всё ТЗ в формате Markdown" onClick={() => void copyPageBrief()} aria-live="polite">{briefCopied ? "Скопировано ✓" : "Копировать MD"}</button><button className={styles.copyBrief} type="button" title="Передать ТЗ и текстовый ввод в AI SEO Editor" onClick={openSeoEditor}>Передать в редактор →</button></div>
+          <div className={styles.sectionHead}><div><span className={styles.sectionIndex}>06</span><div className={styles.titleWithHelp}><h2 id="page-brief-heading">ТЗ для страницы</h2><HelpTip text="Готовый список правок можно вставить в редактор, задачу или передать другому агенту." /></div><p>Готовый Markdown сгруппирован по HTML-зонам. В каждой зоне сначала идут фразы, затем отдельные леммы; строки в рекомендуемом диапазоне не добавляются.</p></div><button className={styles.copyBrief} type="button" title="Скопировать всё ТЗ в формате Markdown" onClick={() => void copyPageBrief()} aria-live="polite">{briefCopied ? "Скопировано ✓" : "Копировать MD"}</button><button className={styles.copyBrief} type="button" title="Передать ТЗ и текстовый ввод в AI SEO Editor" onClick={openSeoEditor}>Передать в редактор →</button><button className={styles.copyBrief} type="button" title="Передать полный результат анализа и исходное ТЗ в нового агента" onClick={openAgent}>Передать агенту →</button></div>
           <pre className={styles.briefMarkdown}><code>{pageBrief}</code></pre>
         </section>
 
